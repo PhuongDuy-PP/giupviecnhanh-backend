@@ -1,0 +1,40 @@
+spring:
+  application:
+    name: gvn-backend
+  
+  datasource:
+    url: jdbc:postgresql://localhost:5434/giupviecnhanh_db
+    username: postgres
+    password: giupviecnhanh123
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+server:
+  port: 8080
+
+jwt:
+  secret: GiupViecNhanhSecretKeyForJWTTokenGeneration2024
+  access-token-expiration: 3600  # 1 hour in seconds
+  refresh-token-expiration: 7200  # 2 hours in seconds
+
+app:
+  name: GVN Backend
+  version: 1.0.0
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+

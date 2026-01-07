@@ -1,0 +1,10 @@
+target/
+.git/
+.idea/
+*.iml
+.DS_Store
+README.md
+JIRA_*.md
+JIRA_*.txt
+
+
