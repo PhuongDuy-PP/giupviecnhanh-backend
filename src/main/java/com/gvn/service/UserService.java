@@ -77,12 +77,24 @@ public class UserService {
     }
     
     public boolean existsByPhoneNumber(String phoneNumber) {
-        return userRepository.existsByPhoneNumber(phoneNumber);
+        // Use findByPhoneNumber instead of repository's existsByPhoneNumber 
+        // to avoid potential cache/index issues with unique constraint
+        Optional<User> userOpt = userRepository.findByPhoneNumber(phoneNumber);
+        boolean exists = userOpt.isPresent();
+        if (exists) {
+            log.debug("Phone number {} exists in database", phoneNumber);
+        } else {
+            log.debug("Phone number {} does not exist in database", phoneNumber);
+        }
+        return exists;
     }
     
     @Transactional
     public User createUser(String phoneNumber, String password, String userType) {
-        if (existsByPhoneNumber(phoneNumber)) {
+        // Double check with findByPhoneNumber to ensure accuracy
+        Optional<User> existingUser = userRepository.findByPhoneNumber(phoneNumber);
+        if (existingUser.isPresent()) {
+            log.warn("Attempt to create user with existing phone number: {}", phoneNumber);
             throw new RuntimeException("Phone number already exists");
         }
         

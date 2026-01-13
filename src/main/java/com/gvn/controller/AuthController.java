@@ -32,17 +32,33 @@ public class AuthController {
                     ApiResponse.success(loginResponse, "Login successful")
             );
         } catch (RuntimeException e) {
-            log.warn("Login failed: {}", e.getMessage());
-            if ("Invalid credentials".equals(e.getMessage())) {
+            String errorMessage = e.getMessage();
+            log.warn("Login failed: {}", errorMessage);
+            
+            // Handle invalid credentials specifically
+            if ("Invalid credentials".equals(errorMessage) || 
+                (errorMessage != null && errorMessage.contains("Invalid credential"))) {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body(ApiResponse.error(
                                 "Phone number or password is incorrect",
                                 401
                         ));
             }
+            
+            // For any other RuntimeException, return 400 with the error message
+            // But make sure we don't return signup-specific messages
+            if (errorMessage != null && errorMessage.contains("already exists")) {
+                log.error("Unexpected 'already exists' error in login endpoint. This should not happen.");
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(ApiResponse.error(
+                                "Login failed. Please check your credentials.",
+                                400
+                        ));
+            }
+            
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(ApiResponse.error(
-                            e.getMessage(),
+                            errorMessage != null ? errorMessage : "Login failed",
                             400
                     ));
         } catch (Exception e) {

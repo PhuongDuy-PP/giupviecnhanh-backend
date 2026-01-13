@@ -16,6 +16,17 @@ spring:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
+  
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 50MB
+  
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
 
 server:
   port: 8080
@@ -28,6 +39,8 @@ jwt:
 app:
   name: GVN Backend
   version: 1.0.0
+  file:
+    upload-dir: uploads
 
 management:
   endpoints:

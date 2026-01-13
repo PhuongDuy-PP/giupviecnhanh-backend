@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -24,6 +25,33 @@ public class PartnerProfile {
     @OneToOne
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+    
+    @Column(name = "full_name")
+    private String fullName;
+    
+    @Column(name = "gender")
+    private String gender;
+    
+    @Column(name = "birthday")
+    private LocalDate birthday;
+    
+    @Column(name = "address")
+    private String address;
+    
+    @Column(name = "cccd")
+    private String cccd;
+    
+    @Column(name = "years_of_experience")
+    private Integer yearsOfExperience;
+    
+    @Column(name = "cccd_front_image_url")
+    private String cccdFrontImageUrl;
+    
+    @Column(name = "cccd_back_image_url")
+    private String cccdBackImageUrl;
+    
+    @Column(name = "health_certificates_urls", columnDefinition = "TEXT")
+    private String healthCertificatesUrls; // JSON array of URLs
     
     @Enumerated(EnumType.STRING)
     @Column(name = "profile_status")

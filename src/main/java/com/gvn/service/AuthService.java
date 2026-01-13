@@ -159,10 +159,16 @@ public class AuthService {
     
     @Transactional
     public LoginResponse register(RegisterRequest request) {
-        // Check if phone number already exists
-        if (userService.existsByPhoneNumber(request.getPhone_number())) {
+        // Check if phone number already exists using findByPhoneNumber for accurate check
+        String phoneNumber = request.getPhone_number();
+        log.info("Checking if phone number {} exists before registration", phoneNumber);
+        
+        // Use findByPhoneNumber directly to avoid potential cache/index issues with existsByPhoneNumber
+        if (userService.existsByPhoneNumber(phoneNumber)) {
+            log.warn("Registration failed: Phone number {} already exists", phoneNumber);
             throw new RuntimeException("Phone number already exists");
         }
+        log.info("Phone number {} is available, proceeding with registration", phoneNumber);
         
         // Create new user
         User user = userService.createUser(
