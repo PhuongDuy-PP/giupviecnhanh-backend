@@ -211,8 +211,6 @@ public class UserProfileService {
         }
         
         try {
-            log.info("Starting partner registration for user: {}", user.getId());
-            
             // Parse birthday
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd");
             LocalDate birthdayDate;
@@ -223,22 +221,18 @@ public class UserProfileService {
                 throw new RuntimeException("Invalid birthday format. Expected: yyyy/MM/dd");
             }
             
-            // Validate and store images
-            log.info("Storing CCCD front image, size: {} bytes", cccdFrontImage.getSize());
+            // Store images (reduced logging for performance)
             String cccdFrontPath;
             try {
                 cccdFrontPath = fileStorageService.storeFile(cccdFrontImage, "documents/cccd");
-                log.info("CCCD front image stored: {}", cccdFrontPath);
             } catch (Exception e) {
                 log.error("Failed to store CCCD front image: ", e);
                 throw new RuntimeException("Failed to store CCCD front image: " + e.getMessage());
             }
             
-            log.info("Storing CCCD back image, size: {} bytes", cccdBackImage.getSize());
             String cccdBackPath;
             try {
                 cccdBackPath = fileStorageService.storeFile(cccdBackImage, "documents/cccd");
-                log.info("CCCD back image stored: {}", cccdBackPath);
             } catch (Exception e) {
                 log.error("Failed to store CCCD back image: ", e);
                 // Clean up front image if back image fails
@@ -252,10 +246,8 @@ public class UserProfileService {
             
             List<String> healthCertUrls = new ArrayList<>();
             if (healthCertificates != null && healthCertificates.length > 0) {
-                log.info("Storing {} health certificate(s)", healthCertificates.length);
                 try {
                     healthCertUrls = fileStorageService.storeMultipleFiles(healthCertificates, "documents/health");
-                    log.info("Health certificates stored: {}", healthCertUrls.size());
                 } catch (Exception e) {
                     log.error("Failed to store health certificates: ", e);
                     // Clean up CCCD images if health certs fail
@@ -291,8 +283,7 @@ public class UserProfileService {
                 throw new RuntimeException("Failed to process health certificates: " + e.getMessage());
             }
             
-            // Create partner profile
-            log.info("Creating partner profile entity");
+            // Create and save partner profile
             PartnerProfile partnerProfile = PartnerProfile.builder()
                     .user(user)
                     .fullName(fullName)
@@ -309,7 +300,6 @@ public class UserProfileService {
             
             try {
                 partnerProfileRepository.save(partnerProfile);
-                log.info("Partner profile saved to database");
             } catch (Exception e) {
                 log.error("Failed to save partner profile to database: ", e);
                 // Clean up all files
@@ -332,7 +322,6 @@ public class UserProfileService {
             try {
                 user.setHasPartnerProfile(true);
                 userRepository.save(user);
-                log.info("User updated with partner profile flag");
             } catch (Exception e) {
                 log.error("Failed to update user: ", e);
                 // Note: Files and partner profile are already saved, so we don't cleanup here

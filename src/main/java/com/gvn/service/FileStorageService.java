@@ -5,14 +5,19 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
 
 @Service
 @Slf4j
@@ -21,87 +26,42 @@ public class FileStorageService {
     @Value("${app.file.upload-dir:uploads}")
     private String uploadDir;
     
+    // Cache resolved base path to avoid repeated resolution
+    private volatile Path cachedBasePath;
+    private static final int BUFFER_SIZE = 64 * 1024; // 64KB buffer for faster I/O
+    private static final ExecutorService fileUploadExecutor = Executors.newFixedThreadPool(4);
+    
+    private Path getBasePath() {
+        if (cachedBasePath == null) {
+            synchronized (this) {
+                if (cachedBasePath == null) {
+                    Path basePath = Paths.get(uploadDir);
+                    if (!basePath.isAbsolute()) {
+                        basePath = Paths.get(System.getProperty("user.dir"), uploadDir).toAbsolutePath();
+                    }
+                    cachedBasePath = basePath;
+                }
+            }
+        }
+        return cachedBasePath;
+    }
+    
     public String storeFile(MultipartFile file, String subdirectory) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File is empty or null");
         }
         
-        log.info("Storing file: {} (size: {} bytes, content type: {}) to subdirectory: {}", 
-                file.getOriginalFilename(), file.getSize(), file.getContentType(), subdirectory);
-        
         try {
-            // Resolve absolute path - handle both relative and absolute paths
-            Path basePath = Paths.get(uploadDir);
-            if (!basePath.isAbsolute()) {
-                // If relative, make it absolute from current working directory
-                String userDir = System.getProperty("user.dir");
-                log.info("Resolving relative path. user.dir: {}, uploadDir: {}", userDir, uploadDir);
-                basePath = Paths.get(userDir, uploadDir).toAbsolutePath();
-            }
+            // Use cached base path for better performance
+            Path basePath = getBasePath();
             
-            log.info("Base upload path: {}", basePath);
-            
-            // Create directory if it doesn't exist
+            // Create directory if it doesn't exist (createDirectories is idempotent and fast)
             Path uploadPath = basePath.resolve(subdirectory);
-            log.info("Target upload directory: {}", uploadPath);
+            Files.createDirectories(uploadPath);
             
-            if (!Files.exists(uploadPath)) {
-                log.info("Creating upload directory: {}", uploadPath);
-                try {
-                    Files.createDirectories(uploadPath);
-                    log.info("Successfully created upload directory: {}", uploadPath);
-                } catch (IOException e) {
-                    log.error("Failed to create upload directory: {}", uploadPath, e);
-                    throw new IOException("Failed to create upload directory: " + uploadPath + " - " + e.getMessage(), e);
-                }
-            }
-            
-            // Check if directory exists and is writable
-            if (!Files.exists(uploadPath)) {
-                throw new IOException("Upload directory does not exist and could not be created: " + uploadPath);
-            }
-            
-            if (!Files.isDirectory(uploadPath)) {
-                throw new IOException("Upload path is not a directory: " + uploadPath);
-            }
-            
-            // Check parent directory permissions first
-            Path parentPath = uploadPath.getParent();
-            if (parentPath != null && !Files.exists(parentPath)) {
-                log.info("Parent directory does not exist, creating: {}", parentPath);
-                try {
-                    Files.createDirectories(parentPath);
-                    log.info("Parent directory created: {}", parentPath);
-                } catch (IOException e) {
-                    log.error("Failed to create parent directory: {}", parentPath, e);
-                    throw new IOException("Failed to create parent directory: " + parentPath + " - " + e.getMessage(), e);
-                }
-            }
-            
+            // Quick check if writable (skip detailed permission checks in hot path)
             if (!Files.isWritable(uploadPath)) {
-                // Try to get more info about permissions
-                try {
-                    String permissions = Files.getPosixFilePermissions(uploadPath).toString();
-                    log.error("Upload directory is not writable: {} (permissions: {})", uploadPath, permissions);
-                } catch (Exception e) {
-                    log.error("Upload directory is not writable: {} (could not get permissions)", uploadPath);
-                }
-                // Try to fix permissions (best effort)
-                try {
-                    java.nio.file.attribute.PosixFilePermission[] perms = {
-                        java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-                        java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
-                        java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
-                        java.nio.file.attribute.PosixFilePermission.GROUP_READ,
-                        java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
-                        java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
-                        java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE
-                    };
-                    Files.setPosixFilePermissions(uploadPath, java.util.Set.of(perms));
-                    log.info("Attempted to fix permissions for: {}", uploadPath);
-                } catch (Exception permEx) {
-                    log.warn("Could not fix permissions: {}", permEx.getMessage());
-                }
+                log.error("Upload directory is not writable: {}", uploadPath);
                 throw new IOException("Upload directory is not writable: " + uploadPath);
             }
             
@@ -113,68 +73,83 @@ public class FileStorageService {
             }
             String filename = UUID.randomUUID().toString() + extension;
             
-            // Save file
+            // Save file with optimized buffered I/O
             Path filePath = uploadPath.resolve(filename);
-            log.info("Storing file to: {} (size: {} bytes)", filePath, file.getSize());
             
-            try {
-                // Use Files.copy with optimized options for better performance
-                // This is faster than buffered streams for large files on modern systems
-                // Note: COPY_ATTRIBUTES may not be supported on all filesystems (e.g., volume mounts)
-                Files.copy(file.getInputStream(), filePath, 
-                    StandardCopyOption.REPLACE_EXISTING);
-                log.info("File copied successfully to: {}", filePath);
+            try (BufferedInputStream bis = new BufferedInputStream(file.getInputStream(), BUFFER_SIZE);
+                 BufferedOutputStream bos = new BufferedOutputStream(
+                     Files.newOutputStream(filePath), BUFFER_SIZE)) {
                 
-                // Verify file was written
-                if (!Files.exists(filePath)) {
-                    throw new IOException("File was not created after copy operation: " + filePath);
+                byte[] buffer = new byte[BUFFER_SIZE];
+                int bytesRead;
+                while ((bytesRead = bis.read(buffer)) != -1) {
+                    bos.write(buffer, 0, bytesRead);
                 }
-                
-                long fileSize = Files.size(filePath);
-                log.info("File stored successfully. Path: {}, Size: {} bytes", filePath, fileSize);
-                
-                if (fileSize == 0) {
-                    log.warn("Warning: Stored file has 0 bytes: {}", filePath);
+                bos.flush();
+            }
+            
+            // Quick verification
+            if (!Files.exists(filePath) || Files.size(filePath) == 0) {
+                if (Files.exists(filePath)) {
+                    Files.delete(filePath);
                 }
-            } catch (IOException e) {
-                log.error("Failed to copy file to: {}", filePath, e);
-                // Try to delete partial file if it exists
-                try {
-                    if (Files.exists(filePath)) {
-                        Files.delete(filePath);
-                        log.info("Deleted partial file: {}", filePath);
-                    }
-                } catch (Exception cleanupEx) {
-                    log.warn("Failed to cleanup partial file: {}", filePath, cleanupEx);
-                }
-                throw new IOException("Failed to store file to " + filePath + ": " + e.getMessage(), e);
+                throw new IOException("File was not written correctly: " + filePath);
             }
             
             // Return relative URL path
-            String relativePath = subdirectory + "/" + filename;
-            log.info("File stored successfully: {} (full path: {})", relativePath, filePath);
-            return relativePath;
+            return subdirectory + "/" + filename;
         } catch (IOException e) {
-            log.error("Error storing file to directory: {} (subdirectory: {})", uploadDir, subdirectory, e);
-            log.error("Exception details - Class: {}, Message: {}", e.getClass().getName(), e.getMessage());
-            if (e.getCause() != null) {
-                log.error("Caused by: {}", e.getCause().getClass().getName(), e.getCause());
-            }
+            log.error("Error storing file (subdirectory: {}): {}", subdirectory, e.getMessage());
             throw new IOException("Failed to store file: " + e.getMessage(), e);
         }
     }
     
     public List<String> storeMultipleFiles(MultipartFile[] files, String subdirectory) throws IOException {
-        List<String> storedUrls = new ArrayList<>();
-        if (files != null) {
-            for (MultipartFile file : files) {
-                if (file != null && !file.isEmpty()) {
-                    String path = storeFile(file, subdirectory);
-                    storedUrls.add(getFileUrl(path));
-                }
+        if (files == null || files.length == 0) {
+            return new ArrayList<>();
+        }
+        
+        // Filter valid files
+        List<MultipartFile> validFiles = new ArrayList<>();
+        for (MultipartFile file : files) {
+            if (file != null && !file.isEmpty()) {
+                validFiles.add(file);
             }
         }
-        return storedUrls;
+        
+        if (validFiles.isEmpty()) {
+            return new ArrayList<>();
+        }
+        
+        // Parallel upload for multiple files
+        if (validFiles.size() > 1) {
+            List<CompletableFuture<String>> futures = validFiles.stream()
+                .map(file -> CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return storeFile(file, subdirectory);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                }, fileUploadExecutor))
+                .collect(Collectors.toList());
+            
+            // Wait for all uploads and collect results
+            List<String> storedUrls = new ArrayList<>();
+            for (CompletableFuture<String> future : futures) {
+                try {
+                    String path = future.get();
+                    storedUrls.add(getFileUrl(path));
+                } catch (Exception e) {
+                    log.error("Error in parallel file upload: ", e);
+                    throw new IOException("Failed to upload file: " + e.getMessage(), e);
+                }
+            }
+            return storedUrls;
+        } else {
+            // Single file - no need for parallel processing
+            String path = storeFile(validFiles.get(0), subdirectory);
+            return List.of(getFileUrl(path));
+        }
     }
     
     public boolean deleteFile(String filePath) {
