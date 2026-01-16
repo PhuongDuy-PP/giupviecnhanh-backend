@@ -75,8 +75,10 @@ jobs:
             docker network connect app-network postgres-gvn 2>/dev/null || true
             
             # Create uploads directory on host if not exists
-            mkdir -p /opt/gvn-backend/uploads
-            chmod -R 755 /opt/gvn-backend/uploads
+            # Use /var/lib instead of /opt (which may be read-only)
+            UPLOAD_DIR="/var/lib/gvn-backend/uploads"
+            mkdir -p ${UPLOAD_DIR}
+            chmod -R 755 ${UPLOAD_DIR}
             
             # Stop and remove old container
             docker stop gvn-backend 2>/dev/null || true
@@ -88,7 +90,7 @@ jobs:
               --restart unless-stopped \
               --network app-network \
               -p 8080:8080 \
-              -v /opt/gvn-backend/uploads:/app/uploads \
+              -v ${UPLOAD_DIR}:/app/uploads \
               --tmpfs /tmp:rw,noexec,nosuid,size=100m \
               -e SPRING_PROFILES_ACTIVE=prod \
               -e DB_HOST=${{ secrets.DB_HOST }} \
