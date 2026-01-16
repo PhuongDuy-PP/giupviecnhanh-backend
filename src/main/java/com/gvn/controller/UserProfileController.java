@@ -149,28 +149,67 @@ public class UserProfileController {
             @RequestParam(value = "health_certificates", required = false) MultipartFile[] healthCertificates
     ) {
         try {
+            log.info("Received applicant registration request. Full name: {}, CCCD: {}", fullName, cccd);
+            
+            // Validate required images
             if (cccdFrontImage == null || cccdFrontImage.isEmpty()) {
+                log.warn("CCCD front image is missing");
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(ApiResponse.error("CCCD front image is required", 400));
             }
             if (cccdBackImage == null || cccdBackImage.isEmpty()) {
+                log.warn("CCCD back image is missing");
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(ApiResponse.error("CCCD back image is required", 400));
             }
+            
+            // Validate file sizes (10MB = 10 * 1024 * 1024 bytes)
+            long maxFileSize = 10 * 1024 * 1024; // 10MB
+            if (cccdFrontImage.getSize() > maxFileSize) {
+                log.warn("CCCD front image too large: {} bytes", cccdFrontImage.getSize());
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(ApiResponse.error("CCCD front image exceeds maximum size of 10MB", 400));
+            }
+            if (cccdBackImage.getSize() > maxFileSize) {
+                log.warn("CCCD back image too large: {} bytes", cccdBackImage.getSize());
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(ApiResponse.error("CCCD back image exceeds maximum size of 10MB", 400));
+            }
+            
+            // Validate health certificates if provided
+            if (healthCertificates != null) {
+                for (MultipartFile cert : healthCertificates) {
+                    if (cert != null && !cert.isEmpty() && cert.getSize() > maxFileSize) {
+                        log.warn("Health certificate too large: {} bytes", cert.getSize());
+                        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                                .body(ApiResponse.error("One or more health certificates exceed maximum size of 10MB", 400));
+                    }
+                }
+            }
+            
+            log.info("File validation passed. Front: {} bytes, Back: {} bytes, Health certs: {}", 
+                    cccdFrontImage.getSize(), cccdBackImage.getSize(), 
+                    healthCertificates != null ? healthCertificates.length : 0);
             
             UserResponse response = userProfileService.registerAsPartner(
                     fullName, gender, birthday, address, cccd, yearsOfExperience,
                     cccdFrontImage, cccdBackImage, healthCertificates
             );
+            log.info("Partner registration completed successfully");
             return ResponseEntity.ok(ApiResponse.success(response, "Partner registration submitted successfully"));
         } catch (RuntimeException e) {
             log.error("Error registering as partner: ", e);
+            log.error("Exception stack trace: ", e);
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(ApiResponse.error(e.getMessage(), 400));
         } catch (Exception e) {
             log.error("Unexpected error registering as partner: ", e);
+            log.error("Exception class: {}, message: {}", e.getClass().getName(), e.getMessage());
+            if (e.getCause() != null) {
+                log.error("Caused by: ", e.getCause());
+            }
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ApiResponse.error("Failed to register as partner", 500));
+                    .body(ApiResponse.error("Failed to register as partner: " + e.getMessage(), 500));
         }
     }
     

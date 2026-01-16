@@ -211,19 +211,88 @@ public class UserProfileService {
         }
         
         try {
+            log.info("Starting partner registration for user: {}", user.getId());
+            
             // Parse birthday
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy/MM/dd");
-            LocalDate birthdayDate = LocalDate.parse(birthday, formatter);
+            LocalDate birthdayDate;
+            try {
+                birthdayDate = LocalDate.parse(birthday, formatter);
+            } catch (Exception e) {
+                log.error("Invalid birthday format: {}", birthday, e);
+                throw new RuntimeException("Invalid birthday format. Expected: yyyy/MM/dd");
+            }
             
-                // Store images
-            String cccdFrontPath = fileStorageService.storeFile(cccdFrontImage, "documents/cccd");
-            String cccdBackPath = fileStorageService.storeFile(cccdBackImage, "documents/cccd");
-            List<String> healthCertUrls = fileStorageService.storeMultipleFiles(healthCertificates, "documents/health");
+            // Validate and store images
+            log.info("Storing CCCD front image, size: {} bytes", cccdFrontImage.getSize());
+            String cccdFrontPath;
+            try {
+                cccdFrontPath = fileStorageService.storeFile(cccdFrontImage, "documents/cccd");
+                log.info("CCCD front image stored: {}", cccdFrontPath);
+            } catch (Exception e) {
+                log.error("Failed to store CCCD front image: ", e);
+                throw new RuntimeException("Failed to store CCCD front image: " + e.getMessage());
+            }
+            
+            log.info("Storing CCCD back image, size: {} bytes", cccdBackImage.getSize());
+            String cccdBackPath;
+            try {
+                cccdBackPath = fileStorageService.storeFile(cccdBackImage, "documents/cccd");
+                log.info("CCCD back image stored: {}", cccdBackPath);
+            } catch (Exception e) {
+                log.error("Failed to store CCCD back image: ", e);
+                // Clean up front image if back image fails
+                try {
+                    fileStorageService.deleteFile(cccdFrontPath);
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to cleanup front image after back image failure", cleanupEx);
+                }
+                throw new RuntimeException("Failed to store CCCD back image: " + e.getMessage());
+            }
+            
+            List<String> healthCertUrls = new ArrayList<>();
+            if (healthCertificates != null && healthCertificates.length > 0) {
+                log.info("Storing {} health certificate(s)", healthCertificates.length);
+                try {
+                    healthCertUrls = fileStorageService.storeMultipleFiles(healthCertificates, "documents/health");
+                    log.info("Health certificates stored: {}", healthCertUrls.size());
+                } catch (Exception e) {
+                    log.error("Failed to store health certificates: ", e);
+                    // Clean up CCCD images if health certs fail
+                    try {
+                        fileStorageService.deleteFile(cccdFrontPath);
+                        fileStorageService.deleteFile(cccdBackPath);
+                    } catch (Exception cleanupEx) {
+                        log.warn("Failed to cleanup CCCD images after health cert failure", cleanupEx);
+                    }
+                    throw new RuntimeException("Failed to store health certificates: " + e.getMessage());
+                }
+            }
             
             // Convert health certificates URLs to JSON
-            String healthCertificatesJson = objectMapper.writeValueAsString(healthCertUrls);
+            String healthCertificatesJson;
+            try {
+                healthCertificatesJson = objectMapper.writeValueAsString(healthCertUrls);
+            } catch (Exception e) {
+                log.error("Failed to convert health certificates to JSON: ", e);
+                // Clean up all files
+                try {
+                    fileStorageService.deleteFile(cccdFrontPath);
+                    fileStorageService.deleteFile(cccdBackPath);
+                    for (String url : healthCertUrls) {
+                        String path = extractPathFromUrl(url);
+                        if (path != null) {
+                            fileStorageService.deleteFile(path);
+                        }
+                    }
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to cleanup files after JSON conversion failure", cleanupEx);
+                }
+                throw new RuntimeException("Failed to process health certificates: " + e.getMessage());
+            }
             
             // Create partner profile
+            log.info("Creating partner profile entity");
             PartnerProfile partnerProfile = PartnerProfile.builder()
                     .user(user)
                     .fullName(fullName)
@@ -238,17 +307,51 @@ public class UserProfileService {
                     .profileStatus(PartnerProfile.ProfileStatus.PENDING)
                     .build();
             
-            partnerProfileRepository.save(partnerProfile);
+            try {
+                partnerProfileRepository.save(partnerProfile);
+                log.info("Partner profile saved to database");
+            } catch (Exception e) {
+                log.error("Failed to save partner profile to database: ", e);
+                // Clean up all files
+                try {
+                    fileStorageService.deleteFile(cccdFrontPath);
+                    fileStorageService.deleteFile(cccdBackPath);
+                    for (String url : healthCertUrls) {
+                        String path = extractPathFromUrl(url);
+                        if (path != null) {
+                            fileStorageService.deleteFile(path);
+                        }
+                    }
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to cleanup files after database save failure", cleanupEx);
+                }
+                throw new RuntimeException("Failed to save partner profile: " + e.getMessage());
+            }
             
             // Update user
-            user.setHasPartnerProfile(true);
-            userRepository.save(user);
+            try {
+                user.setHasPartnerProfile(true);
+                userRepository.save(user);
+                log.info("User updated with partner profile flag");
+            } catch (Exception e) {
+                log.error("Failed to update user: ", e);
+                // Note: Files and partner profile are already saved, so we don't cleanup here
+                throw new RuntimeException("Failed to update user: " + e.getMessage());
+            }
             
-            log.info("Partner profile registered for user: {}", user.getId());
+            log.info("Partner profile registered successfully for user: {}", user.getId());
             return mapToUserResponse(user);
+        } catch (RuntimeException e) {
+            // Re-throw RuntimeException as-is (already logged)
+            throw e;
         } catch (Exception e) {
-            log.error("Error registering partner profile: ", e);
-            throw new RuntimeException("Failed to register partner profile: " + e.getMessage());
+            log.error("Unexpected error registering partner profile for user {}: ", user.getId(), e);
+            log.error("Exception class: {}, message: {}", e.getClass().getName(), e.getMessage());
+            if (e.getCause() != null) {
+                log.error("Caused by: {}", e.getCause().getClass().getName(), e.getCause());
+            }
+            throw new RuntimeException("Failed to register partner profile: " + e.getMessage() + 
+                    " (Type: " + e.getClass().getSimpleName() + ")", e);
         }
     }
     

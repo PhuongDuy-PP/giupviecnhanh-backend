@@ -26,25 +26,53 @@ public class FileStorageService {
             throw new IllegalArgumentException("File is empty or null");
         }
         
+        log.info("Storing file: {} (size: {} bytes, content type: {}) to subdirectory: {}", 
+                file.getOriginalFilename(), file.getSize(), file.getContentType(), subdirectory);
+        
         try {
             // Resolve absolute path - handle both relative and absolute paths
             Path basePath = Paths.get(uploadDir);
             if (!basePath.isAbsolute()) {
                 // If relative, make it absolute from current working directory
-                basePath = Paths.get(System.getProperty("user.dir"), uploadDir).toAbsolutePath();
+                String userDir = System.getProperty("user.dir");
+                log.info("Resolving relative path. user.dir: {}, uploadDir: {}", userDir, uploadDir);
+                basePath = Paths.get(userDir, uploadDir).toAbsolutePath();
             }
+            
+            log.info("Base upload path: {}", basePath);
             
             // Create directory if it doesn't exist
             Path uploadPath = basePath.resolve(subdirectory);
-            log.debug("Creating upload directory: {}", uploadPath);
+            log.info("Target upload directory: {}", uploadPath);
             
             if (!Files.exists(uploadPath)) {
-                Files.createDirectories(uploadPath);
-                log.info("Created upload directory: {}", uploadPath);
+                log.info("Creating upload directory: {}", uploadPath);
+                try {
+                    Files.createDirectories(uploadPath);
+                    log.info("Successfully created upload directory: {}", uploadPath);
+                } catch (IOException e) {
+                    log.error("Failed to create upload directory: {}", uploadPath, e);
+                    throw new IOException("Failed to create upload directory: " + uploadPath + " - " + e.getMessage(), e);
+                }
             }
             
-            // Check if directory is writable
+            // Check if directory exists and is writable
+            if (!Files.exists(uploadPath)) {
+                throw new IOException("Upload directory does not exist and could not be created: " + uploadPath);
+            }
+            
+            if (!Files.isDirectory(uploadPath)) {
+                throw new IOException("Upload path is not a directory: " + uploadPath);
+            }
+            
             if (!Files.isWritable(uploadPath)) {
+                // Try to get more info about permissions
+                try {
+                    String permissions = Files.getPosixFilePermissions(uploadPath).toString();
+                    log.error("Upload directory is not writable: {} (permissions: {})", uploadPath, permissions);
+                } catch (Exception e) {
+                    log.error("Upload directory is not writable: {} (could not get permissions)", uploadPath);
+                }
                 throw new IOException("Upload directory is not writable: " + uploadPath);
             }
             
@@ -58,8 +86,36 @@ public class FileStorageService {
             
             // Save file
             Path filePath = uploadPath.resolve(filename);
-            log.debug("Storing file to: {}", filePath);
-            Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+            log.info("Storing file to: {} (size: {} bytes)", filePath, file.getSize());
+            
+            try {
+                Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+                log.info("File copied successfully to: {}", filePath);
+                
+                // Verify file was written
+                if (!Files.exists(filePath)) {
+                    throw new IOException("File was not created after copy operation: " + filePath);
+                }
+                
+                long fileSize = Files.size(filePath);
+                log.info("File stored successfully. Path: {}, Size: {} bytes", filePath, fileSize);
+                
+                if (fileSize == 0) {
+                    log.warn("Warning: Stored file has 0 bytes: {}", filePath);
+                }
+            } catch (IOException e) {
+                log.error("Failed to copy file to: {}", filePath, e);
+                // Try to delete partial file if it exists
+                try {
+                    if (Files.exists(filePath)) {
+                        Files.delete(filePath);
+                        log.info("Deleted partial file: {}", filePath);
+                    }
+                } catch (Exception cleanupEx) {
+                    log.warn("Failed to cleanup partial file: {}", filePath, cleanupEx);
+                }
+                throw new IOException("Failed to store file to " + filePath + ": " + e.getMessage(), e);
+            }
             
             // Return relative URL path
             String relativePath = subdirectory + "/" + filename;
@@ -67,6 +123,10 @@ public class FileStorageService {
             return relativePath;
         } catch (IOException e) {
             log.error("Error storing file to directory: {} (subdirectory: {})", uploadDir, subdirectory, e);
+            log.error("Exception details - Class: {}, Message: {}", e.getClass().getName(), e.getMessage());
+            if (e.getCause() != null) {
+                log.error("Caused by: {}", e.getCause().getClass().getName(), e.getCause());
+            }
             throw new IOException("Failed to store file: " + e.getMessage(), e);
         }
     }
