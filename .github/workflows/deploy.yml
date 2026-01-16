@@ -75,10 +75,18 @@ jobs:
             docker network connect app-network postgres-gvn 2>/dev/null || true
             
             # Create uploads directory on host if not exists
-            # Use /var/lib instead of /opt (which may be read-only)
-            UPLOAD_DIR="/var/lib/gvn-backend/uploads"
+            # Try multiple locations (some systems have read-only /opt and /var/lib)
+            # Priority: home directory > current directory > /tmp (fallback)
+            if [ -w "$HOME" ]; then
+              UPLOAD_DIR="$HOME/gvn-backend/uploads"
+            elif [ -w "." ]; then
+              UPLOAD_DIR="$(pwd)/gvn-backend/uploads"
+            else
+              UPLOAD_DIR="/tmp/gvn-backend/uploads"
+            fi
             mkdir -p ${UPLOAD_DIR}
             chmod -R 755 ${UPLOAD_DIR}
+            echo "Using upload directory: ${UPLOAD_DIR}"
             
             # Stop and remove old container
             docker stop gvn-backend 2>/dev/null || true
