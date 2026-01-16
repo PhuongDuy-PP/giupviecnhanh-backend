@@ -74,16 +74,22 @@ jobs:
             # Connect PostgreSQL container to network (if exists)
             docker network connect app-network postgres-gvn 2>/dev/null || true
             
+            # Create uploads directory on host if not exists
+            mkdir -p /opt/gvn-backend/uploads
+            chmod -R 755 /opt/gvn-backend/uploads
+            
             # Stop and remove old container
             docker stop gvn-backend 2>/dev/null || true
             docker rm gvn-backend 2>/dev/null || true
             
-            # Run new container with port mapping
+            # Run new container with port mapping and volume mounts
             docker run -d \
               --name gvn-backend \
               --restart unless-stopped \
               --network app-network \
               -p 8080:8080 \
+              -v /opt/gvn-backend/uploads:/app/uploads \
+              --tmpfs /tmp:rw,noexec,nosuid,size=100m \
               -e SPRING_PROFILES_ACTIVE=prod \
               -e DB_HOST=${{ secrets.DB_HOST }} \
               -e DB_PORT=${{ secrets.DB_PORT || 5432 }} \

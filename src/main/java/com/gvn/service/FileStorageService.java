@@ -89,7 +89,11 @@ public class FileStorageService {
             log.info("Storing file to: {} (size: {} bytes)", filePath, file.getSize());
             
             try {
-                Files.copy(file.getInputStream(), filePath, StandardCopyOption.REPLACE_EXISTING);
+                // Use Files.copy with optimized options for better performance
+                // This is faster than buffered streams for large files on modern systems
+                Files.copy(file.getInputStream(), filePath, 
+                    StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.COPY_ATTRIBUTES);
                 log.info("File copied successfully to: {}", filePath);
                 
                 // Verify file was written

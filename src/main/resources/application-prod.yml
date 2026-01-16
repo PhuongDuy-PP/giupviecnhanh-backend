@@ -21,9 +21,10 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 50MB
-      file-size-threshold: 2KB
+      file-size-threshold: 0  # Always write to disk immediately (tmpfs is fast)
       location: /tmp
       enabled: true
+      resolve-lazily: false  # Resolve multipart immediately for better performance
 
 server:
   port: ${SERVER_PORT:8080}
