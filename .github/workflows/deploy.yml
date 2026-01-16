@@ -88,9 +88,14 @@ jobs:
             mkdir -p ${UPLOAD_DIR}/avatars
             mkdir -p ${UPLOAD_DIR}/documents/cccd
             mkdir -p ${UPLOAD_DIR}/documents/health
-            chmod -R 755 ${UPLOAD_DIR}
+            
+            # Set permissive permissions so container user (spring) can write
+            # Using 777 because container runs as different user than host
+            chmod -R 777 ${UPLOAD_DIR}
+            echo "Set permissions to 777 for ${UPLOAD_DIR} (container user needs write access)"
+            
             echo "Using upload directory: ${UPLOAD_DIR}"
-            echo "Directory structure created:"
+            echo "Directory structure and permissions:"
             ls -la ${UPLOAD_DIR} || true
             ls -la ${UPLOAD_DIR}/documents 2>/dev/null || true
             
