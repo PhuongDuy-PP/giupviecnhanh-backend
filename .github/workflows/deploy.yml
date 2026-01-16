@@ -99,6 +99,28 @@ jobs:
               -e JWT_SECRET=${{ secrets.JWT_SECRET }} \
               ${IMAGE_NAME}:latest
             
+            # Wait a moment for container to start
+            sleep 5
+            
+            # Check container status
+            CONTAINER_STATUS=$(docker inspect -f '{{.State.Status}}' gvn-backend 2>/dev/null || echo "not-found")
+            echo "Container status: ${CONTAINER_STATUS}"
+            
+            if [ "${CONTAINER_STATUS}" != "running" ]; then
+              echo "Container is not running. Showing logs:"
+              docker logs gvn-backend 2>&1 || echo "Could not retrieve logs"
+              echo "Container failed to start. Exiting with error."
+              exit 1
+            fi
+            
+            # Show container info
+            echo "Container started successfully!"
+            docker ps | grep gvn-backend || docker ps -a | grep gvn-backend
+            
+            # Show recent logs
+            echo "Recent container logs:"
+            docker logs --tail 50 gvn-backend
+            
             # Cleanup
             docker image prune -f
 
