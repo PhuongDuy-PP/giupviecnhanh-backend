@@ -120,9 +120,9 @@ public class FileStorageService {
             try {
                 // Use Files.copy with optimized options for better performance
                 // This is faster than buffered streams for large files on modern systems
+                // Note: COPY_ATTRIBUTES may not be supported on all filesystems (e.g., volume mounts)
                 Files.copy(file.getInputStream(), filePath, 
-                    StandardCopyOption.REPLACE_EXISTING,
-                    StandardCopyOption.COPY_ATTRIBUTES);
+                    StandardCopyOption.REPLACE_EXISTING);
                 log.info("File copied successfully to: {}", filePath);
                 
                 // Verify file was written
