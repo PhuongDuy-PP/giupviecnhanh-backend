@@ -65,6 +65,19 @@ public class FileStorageService {
                 throw new IOException("Upload path is not a directory: " + uploadPath);
             }
             
+            // Check parent directory permissions first
+            Path parentPath = uploadPath.getParent();
+            if (parentPath != null && !Files.exists(parentPath)) {
+                log.info("Parent directory does not exist, creating: {}", parentPath);
+                try {
+                    Files.createDirectories(parentPath);
+                    log.info("Parent directory created: {}", parentPath);
+                } catch (IOException e) {
+                    log.error("Failed to create parent directory: {}", parentPath, e);
+                    throw new IOException("Failed to create parent directory: " + parentPath + " - " + e.getMessage(), e);
+                }
+            }
+            
             if (!Files.isWritable(uploadPath)) {
                 // Try to get more info about permissions
                 try {
@@ -72,6 +85,22 @@ public class FileStorageService {
                     log.error("Upload directory is not writable: {} (permissions: {})", uploadPath, permissions);
                 } catch (Exception e) {
                     log.error("Upload directory is not writable: {} (could not get permissions)", uploadPath);
+                }
+                // Try to fix permissions (best effort)
+                try {
+                    java.nio.file.attribute.PosixFilePermission[] perms = {
+                        java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+                        java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+                        java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE,
+                        java.nio.file.attribute.PosixFilePermission.GROUP_READ,
+                        java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE,
+                        java.nio.file.attribute.PosixFilePermission.OTHERS_READ,
+                        java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE
+                    };
+                    Files.setPosixFilePermissions(uploadPath, java.util.Set.of(perms));
+                    log.info("Attempted to fix permissions for: {}", uploadPath);
+                } catch (Exception permEx) {
+                    log.warn("Could not fix permissions: {}", permEx.getMessage());
                 }
                 throw new IOException("Upload directory is not writable: " + uploadPath);
             }
