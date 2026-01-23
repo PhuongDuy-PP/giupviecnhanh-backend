@@ -32,17 +32,29 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         
         String token = extractTokenFromRequest(request);
         
-        if (token != null && !jwtService.isTokenExpired(token) && !jwtService.isRefreshToken(token)) {
+        if (token != null) {
             try {
-                UUID userId = jwtService.extractUserId(token);
-                userService.findById(userId).ifPresent(user -> {
-                    UsernamePasswordAuthenticationToken authentication = 
-                            new UsernamePasswordAuthenticationToken(user, null, null);
-                    authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                    SecurityContextHolder.getContext().setAuthentication(authentication);
-                });
+                // Check if token is expired or refresh token
+                if (jwtService.isTokenExpired(token)) {
+                    log.warn("Token expired for request: {}", request.getRequestURI());
+                    // Continue filter chain - SecurityConfig will handle 403 if authentication required
+                } else if (jwtService.isRefreshToken(token)) {
+                    log.warn("Refresh token used instead of access token for request: {}", request.getRequestURI());
+                    // Continue filter chain - SecurityConfig will handle 403 if authentication required
+                } else {
+                    // Valid access token - extract and set authentication
+                    UUID userId = jwtService.extractUserId(token);
+                    userService.findById(userId).ifPresent(user -> {
+                        UsernamePasswordAuthenticationToken authentication = 
+                                new UsernamePasswordAuthenticationToken(user, null, null);
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                        log.debug("Authentication set for user: {}", userId);
+                    });
+                }
             } catch (Exception e) {
-                log.error("Error processing JWT token: ", e);
+                log.error("Error processing JWT token for request {}: {}", request.getRequestURI(), e.getMessage());
+                // Continue filter chain - SecurityConfig will handle 403 if authentication required
             }
         }
         
